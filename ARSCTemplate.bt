@@ -1,0 +1,683 @@
+//--------------------------------------
+//--- 010 Editor v6.0.2 Binary Template
+//
+// Author: Ovie
+// Purpose: Parse Android resources.asrc file
+// Reference: 
+//      https://android.googlesource.com/platform/frameworks/base/+/android-4.4.4_r1.0.1/include/androidfw/ResourceTypes.h
+//      https://github.com/tomken/010_template_for_android/blob/master/ARSCTemplate.bt
+//      http://blog.csdn.net/luoshengyang/article/details/8744683
+// Build: 2017.9.22
+//--------------------------------------
+
+// Define structures used in resources.asrc files
+
+typedef enum<ushort> {
+    RES_NULL_TYPE               = 0x0000,
+    RES_STRING_POOL_TYPE        = 0x0001,
+    RES_TABLE_TYPE              = 0x0002,
+    RES_XML_TYPE                = 0x0003,
+    // Chunk types in RES_XML_TYPE
+    RES_XML_FIRST_CHUNK_TYPE    = 0x0100,
+    RES_XML_START_NAMESPACE_TYPE= 0x0100,
+    RES_XML_END_NAMESPACE_TYPE  = 0x0101,
+    RES_XML_START_ELEMENT_TYPE  = 0x0102,
+    RES_XML_END_ELEMENT_TYPE    = 0x0103,
+    RES_XML_CDATA_TYPE          = 0x0104,
+    RES_XML_LAST_CHUNK_TYPE     = 0x017f,
+    // This contains a uint32_t array mapping strings in the string
+    // pool back to resource identifiers.  It is optional.
+    RES_XML_RESOURCE_MAP_TYPE   = 0x0180,
+    // Chunk types in RES_TABLE_TYPE
+    RES_TABLE_PACKAGE_TYPE      = 0x0200,
+    RES_TABLE_TYPE_TYPE         = 0x0201,
+    RES_TABLE_TYPE_SPEC_TYPE    = 0x0202
+} ResChunk_header_type;
+
+typedef struct {
+    // Type identifier for this chunk.  The meaning of this value depends
+    // on the containing chunk.
+    //ushort type <format=hex>;
+    ResChunk_header_type type <name="ushort type", format=hex>;
+    // Size of the chunk header (in bytes).  Adding this value to
+    // the address of the chunk allows you to find its associated data
+    // (if any).
+    ushort headerSize;
+    // Total size of this chunk (in bytes).  This is the chunkSize plus
+    // the size of any data associated with the chunk.  Adding this value
+    // to the chunk allows you to completely skip its contents (including
+    // any child chunks).  If this value is the same as chunkSize, there is
+    // no data associated with the chunk.
+    uint size;
+} ResChunk_header <open=true>;
+
+typedef struct {
+    struct ResChunk_header common_header;
+    // The number of ResTable_package structures.
+    uint packageCount;
+} ResTable_header;
+
+
+// StringPool struct definition
+local uint UTF8_FLAG = 1<<8;
+local uint SORTED_FLAG = 1<<0;
+
+typedef struct {
+    ResChunk_header common_header;
+    // Number of strings in this pool (number of uint32_t indices that follow
+    // in the data).
+    uint stringCount;
+    // Number of style span arrays in the pool (number of uint32_t indices
+    // follow the string indices).
+    uint styleCount;
+    // Flags.
+    uint flags <read=stringPoolHeaderFlagRead>;
+    // Index from header of the string data.
+    uint stringsStart;
+    // Index from header of the style data.
+    uint stylesStart;
+} ResStringPool_header;
+
+string stringPoolHeaderFlagRead(uint &f){
+    string l = "";
+    string r = "";
+    if(f & UTF8_FLAG) l += "UTF8";
+    if(f & SORTED_FLAG) l += ", SORTED";
+    if(l != ""){
+        SPrintf(r, "(%xh)", f);
+    }else{
+        SPrintf(r, "%xh", f);
+    }
+    return l + r;
+}
+
+typedef struct {
+    local int size;
+    local ubyte hval = ReadUByte(FTell());
+    FSkip(1);
+    local ubyte lval = ReadUByte(FTell());
+    FSkip(1);
+    if((hval & 0x80) != 0) {
+        size = (((hval & 0x7F) << 8)) | lval;
+    } else {
+        size = hval;
+    }
+} utf8size <read=Utf8SizeRead, comment="Unsigned little-endian base 128 value">;
+
+string Utf8SizeRead(utf8size &u) {
+    local string s;
+    s = SPrintf(s, "%xh", u.size);
+    return s;
+}
+
+typedef struct {
+    utf8size len;
+    if (len.size > 0) {
+        wchar_t data[len.size];
+    }
+} string_utf16;
+
+typedef struct string_utf16_offset_st(uint stringPart_offset){
+    uint offset;
+
+    local uint oldPos = FTell();
+    local int string_offset = stringPart_offset + offset;
+    FSeek(string_offset);
+
+    string_utf16 str;
+
+    FSeek(oldPos);
+
+} string_utf16_offset <read=offset2UTF16String>;
+
+string offset2UTF16String(string_utf16_offset_st &o) {
+    if (o.str.len > 0)
+        return o.str.data;
+    else
+        return "";
+}
+
+typedef struct {
+    utf8size len;
+    if (len.size > 0) {
+        char data[len.size];
+    }
+} string_utf8;
+
+typedef struct string_utf8_offset_st(uint stringPart_offset){
+    uint offset;
+
+    local uint oldPos = FTell();
+    local int string_offset = stringPart_offset + offset;
+    FSeek(string_offset);
+
+    string_utf8 str;
+
+    FSeek(oldPos);
+
+} string_utf8_offset <read=offset2UTF8String>;
+
+string offset2UTF8String(string_utf8_offset &o){
+    if (o.str.len.size > 0)
+        return o.str.data;
+    else
+        return "";
+}
+
+typedef struct {
+    // Index into the string pool table (uint32_t-offset from the indices
+    // immediately after ResStringPool_header) at which to find the location
+    // of the string data in the pool.
+    uint index;
+} ResStringPool_ref; 
+
+
+typedef struct {
+    enum {
+        END = 0xFFFFFFFF
+    };
+    // This is the name of the span -- that is, the name of the XML
+    // tag that defined it.  The special value END (0xFFFFFFFF) indicates
+    // the end of an array of spans.
+    ResStringPool_ref name <read=globalStringPoolRefRead>; // TODO: fixMe
+    // The range of characters in the string that this span applies to.
+    uint firstChar, lastChar;
+} ResStringPool_span;
+
+string globalStringPoolRefRead(ResStringPool_ref &o){
+    local string s;
+    if(o.index >=0 && o.index < globalStringPool.header.stringCount){
+        if(globalStringPool.stringOffset[o.index].str.len.size > 0){
+            return globalStringPool.stringOffset[o.index].str.data + SPrintf(s, "(%d)", o.index);
+        }else{
+            return "";
+        }
+    }else if(o.index == END){
+        return "";
+    }else{
+        return "Invalid index";
+    }
+}
+
+typedef struct style_offset_st(uint stylePart_offset){
+    uint offset;
+
+    local uint oldPos = FTell();
+    local int style_offset = stylePart_offset + offset;
+    FSeek(style_offset);
+
+    local uint index;
+    while((index = ReadUInt(FTell())) != END){
+        ResStringPool_span span;
+    }
+    ResStringPool_ref ref;
+
+    FSeek(oldPos);
+
+} style_offset;
+
+
+
+typedef struct {
+    local uint chunk_begin = FTell();
+
+    ResStringPool_header header;
+    
+    local uint i;
+    local uint stringOffsetPart_offset = FTell() ;
+    local uint stringPart_offset = chunk_begin + header.stringsStart;
+    for(i=0; i<header.stringCount; i++) {
+        if (header.flags & UTF8_FLAG) {
+            string_utf8_offset stringOffset(stringPart_offset) <comment="String Item">;
+        } else {
+            string_utf16_offset stringOffset(stringPart_offset) <comment="String Item">;
+        }
+    }
+    local uint stylePart_offset = chunk_begin+header.stylesStart;
+    for(i=0; i<header.styleCount; i++) {
+        style_offset styleOffset(stylePart_offset) <comment="Style Item">;
+    }
+    
+    FSeek(chunk_begin + header.common_header.size);
+} ResStringPool;
+
+// End of StringPool struct definition
+
+// Package struct definition
+
+typedef struct {
+    struct ResChunk_header common_header;
+    // The type identifier this chunk is holding.  Type IDs start
+    // at 1 (corresponding to the value of the type bits in a
+    // resource identifier).  0 is invalid.
+    ubyte id <read=typeStringRead>;
+    
+    // Must be 0.
+    ubyte res0;
+    // Must be 0.
+    ushort res1;
+    
+    // Number of uint32_t entry configuration masks that follow.
+    uint entryCount;
+    enum {
+        // Additional flag indicating an entry is public.
+        SPEC_PUBLIC = 0x40000000
+    };
+    if (entryCount > 0) {
+        uint entries[entryCount] <format=hex>;
+    }
+} ResTable_typeSpec;
+
+string typeStringRead(ubyte &id){
+    local string s;
+    if(id >= 1 && id <= package.typeStringPool.header.stringCount){
+        return package.typeStringPool.stringOffset[id-1].str.data + SPrintf(s, "(%xh)", id);
+    }else{
+        return SPrintf(s, "INVALID(%xh)", id);
+    }
+    
+}
+
+typedef struct {
+    // Number of bytes in this structure.
+    uint size;
+
+    union {
+        struct {
+            ushort mcc <comment="Mobile country code (from SIM).  0 means \"any\".">;
+            ushort mnc <comment="Mobile network code (from SIM).  0 means \"any\"">;
+        } imsi_;
+        uint imsi;
+    } imsi;
+    
+    union {
+        struct {
+            char language[2] <comment="\0\0 means \"any\".  Otherwise, en, fr, etc.">;
+            char country[2] <comment="\0\0 means \"any\".  Otherwise, US, CA, etc.">;
+        } locale_;
+        uint locale;
+    } locale;
+        
+    typedef enum<ubyte> {
+        ORIENTATION_ANY  = 0x00,
+        ORIENTATION_PORT = 0x01,
+        ORIENTATION_LAND = 0x02,
+        ORIENTATION_SQUARE = 0x03,
+    } ORIENTATION;
+
+    typedef enum<ubyte> {
+        TOUCHSCREEN_ANY  = 0x00,
+        TOUCHSCREEN_NOTOUCH  = 0001,
+        TOUCHSCREEN_STYLUS  = 0x02,
+        TOUCHSCREEN_FINGER  = 0x03,
+    } TOUCHSCREEN;
+
+    typedef enum<ushort> {
+        DENSITY_DEFAULT = 0,
+        DENSITY_LOW = 120,
+        DENSITY_MEDIUM = 160,
+        DENSITY_TV = 213,
+        DENSITY_HIGH = 240,
+        DENSITY_XHIGH = 320,
+        DENSITY_XXHIGH = 480,
+        DENSITY_XXXHIGH = 640,
+        DENSITY_NONE = 0xffff
+    } DENSITY;
+
+    union {
+        struct {
+            ORIENTATION orientation <name="ubyte orientation", format=hex>;
+            TOUCHSCREEN touchscreen <name="ubyte touchscreen", format=hex>;
+            DENSITY density <name="ushort density", format=hex>;
+        } screenType_;
+        uint screenType;
+    } screenType;
+    
+
+    typedef enum<ubyte> {
+        KEYBOARD_ANY  = 0x00,
+        KEYBOARD_NOKEYS  = 0x01,
+        KEYBOARD_QWERTY  = 0x02,
+        KEYBOARD_12KEY  = 0x03,
+    } KEYBOARD;
+
+    typedef enum<ubyte> {
+        NAVIGATION_ANY  = 0x00,
+        NAVIGATION_NONAV  = 0x01,
+        NAVIGATION_DPAD  = 0x02,
+        NAVIGATION_TRACKBALL  = 0x03,
+        NAVIGATION_WHEEL  = 0x04,
+    } NAVIGATION;
+
+    typedef enum<ubyte> {
+        // MASK_KEYSHIDDEN = 0x0003,
+        KEYSHIDDEN_ANY = 0x0000,
+        KEYSHIDDEN_NO = 0x0001,
+        KEYSHIDDEN_YES = 0x0002,
+        KEYSHIDDEN_SOFT = 0x0003,
+    } KEYSHIDDEN;
+
+    
+
+    typedef enum<ubyte> {
+        // MASK_NAVHIDDEN = 0x000c,
+        // SHIFT_NAVHIDDEN = 2
+        NAVHIDDEN_ANY = 0x0000 << 2,
+        NAVHIDDEN_NO = 0x0001 << 2,
+        NAVHIDDEN_YES = 0x0002 << 2,
+    } NAVHIDDEN;
+
+    union {
+        struct {
+            KEYBOARD keyboard <name="ubyte keyboard", format=hex>;
+            NAVIGATION navigation <name="ubyte navigation", format=hex>;;
+            KEYSHIDDEN inputFlags <name="ubyte inputFlags", format=hex>;;
+            NAVHIDDEN inputPad0 <name="ubyte inputPad0", format=hex>;;
+        } input_;
+        uint input;
+    } input;
+    
+
+    typedef enum<ushort> {
+        SCREENWIDTH_ANY = 0
+    } SCREENWIDTH;
+    
+    typedef enum<ushort> {
+        SCREENHEIGHT_ANY = 0
+    } SCREENHEIGHT;
+
+    union {
+        struct {
+            SCREENWIDTH screenWidth <name="ushort screenWidth", format=hex>;
+            SCREENHEIGHT screenHeight <name="ushort screenWidth", format=hex>;
+        } screenSize_;
+        uint screenSize;
+    } screenSize;
+    
+
+    typedef enum<ushort> {
+        SDKVERSION_ANY = 0
+    } SDKVERSION;
+    
+    typedef enum<ushort> {
+        MINORVERSION_ANY = 0
+    } MINORVERSION;
+
+    union {
+        struct {
+            SDKVERSION sdkVersion <name="ushort sdkVersion", format=hex>;
+            // For now minorVersion must always be 0!!!  Its meaning
+            // is currently undefined.
+            MINORVERSION minorVersion <name="ushort minorVersion", format=hex>;
+        } version_;
+        uint version;
+    } version;
+    
+
+    union {
+        struct {
+            ubyte screenLayout;
+            ubyte uiMode;
+            ushort smallestScreenWidthDp;
+        } screenConfig_;
+        uint screenConfig;
+    } screenConfig;
+    
+    union {
+        struct {
+            ushort screenWidthDp;
+            ushort screenHeightDp;
+        } screenSizeDp_;
+        uint screenSizeDp;
+    } screenSizeDp;
+
+
+    uchar localeScript[4]; // UNKNOWN
+    uchar localeVariant[8]; // UNKNOWN
+    uint screenConfig2; // UNKNOWN
+    
+} ResTable_config;
+
+typedef struct {
+    // Number of bytes in this structure.
+    ushort size;
+    enum {
+        // If set, this is a complex entry, holding a set of name/value
+        // mappings.  It is followed by an array of ResTable_map structures.
+        FLAG_COMPLEX = 0x0001,
+        // If set, this resource has been declared public, so libraries
+        // are allowed to reference it.
+        FLAG_PUBLIC = 0x0002  // Not about the res/public.xml
+    };
+    ushort flags <read=entryFlagsRead>;
+    
+    // Reference into ResTable_package::keyStrings identifying this entry.
+    ResStringPool_ref key <read=keyStringRead>;
+} ResTable_entry;
+
+string entryFlagsRead(ushort &flags){
+    local string l = "";
+    local string r = "";
+    if(flags & FLAG_COMPLEX) l += "FLAG_COMPLEX";
+    if(flags & FLAG_PUBLIC) l += ", FLAG_PUBLIC";
+    if(l != ""){
+        SPrintf(r, "(%xh)", flags);
+    }else{
+        SPrintf(r, "%xh", flags);
+    }
+    return l + r;
+}
+
+string keyStringRead(ResStringPool_ref &o){
+    local string s;
+    if(o.index >=0 && o.index < package.keyStringPool.header.stringCount){
+        if(package.keyStringPool.stringOffset[o.index].str.len.size > 0){
+            return package.keyStringPool.stringOffset[o.index].str.data + SPrintf(s, "(%d)", o.index);
+        }else{
+            return "";
+        }
+    }else if(o.index == END){
+        return "";
+    }else{
+        return "Invalid index";
+    }
+}
+
+typedef struct {
+    // Number of bytes in this structure.
+    ushort size;
+    // Always set to 0.
+    ubyte res0;
+        
+    typedef enum<ubyte> {
+        // Contains no data.
+        TYPE_NULL = 0x00,
+        // The 'data' holds a ResTable_ref, a reference to another resource
+        // table entry.
+        TYPE_REFERENCE = 0x01,
+        // The 'data' holds an attribute resource identifier.
+        TYPE_ATTRIBUTE = 0x02,
+        // The 'data' holds an index into the containing resource table's
+        // global value string pool.
+        TYPE_STRING = 0x03,
+        // The 'data' holds a single-precision floating point number.
+        TYPE_FLOAT = 0x04,
+        // The 'data' holds a complex number encoding a dimension value,
+        // such as "100in".
+        TYPE_DIMENSION = 0x05,
+        // The 'data' holds a complex number encoding a fraction of a
+        // container.
+        TYPE_FRACTION = 0x06,
+        // Beginning of integer flavors...
+        TYPE_FIRST_INT = 0x10,
+        // The 'data' is a raw integer value of the form n..n.
+        TYPE_INT_DEC = 0x10,
+        // The 'data' is a raw integer value of the form 0xn..n.
+        TYPE_INT_HEX = 0x11,
+        // The 'data' is either 0 or 1, for input "false" or "true" respectively.
+        TYPE_INT_BOOLEAN = 0x12,
+        // Beginning of color integer flavors...
+        TYPE_FIRST_COLOR_INT = 0x1c,
+        // The 'data' is a raw integer value of the form #aarrggbb.
+        TYPE_INT_COLOR_ARGB8 = 0x1c,
+        // The 'data' is a raw integer value of the form #rrggbb.
+        TYPE_INT_COLOR_RGB8 = 0x1d,
+        // The 'data' is a raw integer value of the form #argb.
+        TYPE_INT_COLOR_ARGB4 = 0x1e,
+        // The 'data' is a raw integer value of the form #rgb.
+        TYPE_INT_COLOR_RGB4 = 0x1f,
+        // ...end of integer flavors.
+        TYPE_LAST_COLOR_INT = 0x1f,
+        // ...end of integer flavors.
+        TYPE_LAST_INT = 0x1f
+    } DATATYPE;
+
+    DATATYPE dataType <name="ubyte dataType", format=hex>;
+
+    // The data for this item, as interpreted according to dataType.
+    uint data <comment="The data for this item, as interpreted according to dataType.">;
+} Res_value;
+
+typedef struct {
+    uint ident <format=hex>;
+} ResTable_ref;
+
+typedef struct {
+    // The resource identifier defining this mapping's name.  For attribute
+    // resources, 'name' can be one of the following special resource types
+    // to supply meta-data about the attribute; for all other resource types
+    // it must be an attribute resource.
+    ResTable_ref name;
+    // This mapping's value.
+    Res_value value;
+} ResTable_map;
+
+typedef struct {
+    ResTable_entry entry <open=true>;
+    // Resource identifier of the parent mapping, or 0 if there is none.
+    ResTable_ref parent;
+    // Number of name/value pairs that follow for FLAG_COMPLEX.
+    uint count;
+    if(count > 0){
+        ResTable_map data[count];
+    }
+} ResTable_map_entry;
+
+
+typedef struct {
+    struct ResChunk_header common_header;
+    enum {
+        NO_ENTRY = 0xFFFFFFFF
+    };
+    
+    // The type identifier this chunk is holding.  Type IDs start
+    // at 1 (corresponding to the value of the type bits in a
+    // resource identifier).  0 is invalid.
+    ubyte id <read=typeStringRead>;
+    
+    // Must be 0.
+    ubyte res0;
+    // Must be 0.
+    ushort res1;
+    
+    // Number of uint32_t entry indices that follow.
+    uint entryCount;
+    // Offset from header where ResTable_entry data starts.
+    uint entriesStart;
+    
+    local uint cfgBegin = FTell();
+    // Configuration this collection of entries is designed for.
+    ResTable_config config;
+    FSeek(cfgBegin + config.size);
+
+    local ushort size;
+    local ushort flag;
+    local int i;
+    local uint entryOff;
+    if (entryCount > 0) {
+        uint entryOffsets[entryCount] <format=hex>;
+
+        local uint entryBegin = FTell();
+
+        for(i=0; i<entryCount; i++) {
+            entryOff = entryOffsets[i];
+            if (entryOff != 0xFFFFFFFF) {
+                FSeek(entryBegin + entryOff);
+                size = ReadUShort(FTell());
+                flag = ReadUShort(FTell()+2);
+                if (flag & FLAG_COMPLEX) {
+                    ResTable_map_entry mapEntry;
+                
+                } else {
+                    ResTable_entry entry;
+                    Res_value value;
+                }
+            }
+        }
+    }
+
+} ResTable_type;
+
+
+typedef struct {
+    local uint package_begin = FTell();
+    struct ResChunk_header common_header;
+    // If this is a base package, its ID.  Package IDs start
+    // at 1 (corresponding to the value of the package bits in a
+    // resource identifier).  0 means this is not a base package.
+    uint id;
+    // Actual name of this package, \0-terminated.
+    wchar_t name[128];
+    // Offset to a ResStringPool_header defining the resource
+    // type symbol table.  If zero, this package is inheriting from
+    // another base package (overriding specific values in it).
+    uint typeStrings <name="uint typeStringsOffset">;
+    // Last index into typeStrings that is for public use by others.
+    uint lastPublicType <comment="typeStringsCount">;
+    // Offset to a ResStringPool_header defining the resource
+    // key symbol table.  If zero, this package is inheriting from
+    // another base package (overriding specific values in it).
+    uint keyStrings <name="uint keyStringsOffset">;
+    // Last index into keyStrings that is for public use by others.
+    uint lastPublicKey <comment="keyStringsCount">;
+
+    /* Unknown */FSkip(4);
+    ResStringPool typeStringPool;
+    ResStringPool keyStringPool;
+    
+
+    local uint cur = FTell();
+    local uint end = package_begin + package.common_header.size;
+    local ushort type;
+    local uint size;
+    while(cur < end) {
+        type = ReadUShort(cur);
+        size = ReadUInt(cur+4);
+    
+        if (type == RES_TABLE_TYPE_SPEC_TYPE) {
+            ResTable_typeSpec typespec;
+        } else if (type == RES_TABLE_TYPE_TYPE) {
+            ResTable_type typetype;
+        } else if (type == RES_TABLE_LIBRARY_TYPE) {
+            Printf("unsupported type RES_TABLE_LIBRARY_TYPE\n");
+        } else {
+            Printf("unknow type %x\n", htype);
+            break;
+        }
+    
+        cur += size;
+        FSeek(cur);
+    }
+} ResTable_package;
+
+
+
+// End of Package struct definition
+//--------------------------------------------
+
+// Define the file
+LittleEndian();
+
+ResTable_header res;
+ResStringPool globalStringPool;
+ResTable_package package;
