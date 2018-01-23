@@ -4,8 +4,12 @@
 // File: 
 // Author: Ovie
 // Purpose: Parse Android resources.asrc file
-// Reference: https://android.googlesource.com/platform/frameworks/base/+/android-4.4.4_r1.0.1/include/androidfw/ResourceTypes.h
+// Reference: 
+//    https://android.googlesource.com/platform/frameworks/base/+/android-4.4.4_r1.0.1/include/androidfw/ResourceTypes.h
+//    https://github.com/tomken/010_template_for_android/blob/master/ARSCTemplate.bt
+//    http://blog.csdn.net/luoshengyang/article/details/8744683
 // Build: 2017.9.22
+// Update: 2018.01.23
 //--------------------------------------
 
 // Define structures used in resources.asrc files
