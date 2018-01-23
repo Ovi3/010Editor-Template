@@ -1,12 +1,10 @@
 //--------------------------------------
 //--- 010 Editor v6.0.2 Binary Template
 //
+// File: 
 // Author: Ovie
 // Purpose: Parse Android resources.asrc file
-// Reference: 
-//      https://android.googlesource.com/platform/frameworks/base/+/android-4.4.4_r1.0.1/include/androidfw/ResourceTypes.h
-//      https://github.com/tomken/010_template_for_android/blob/master/ARSCTemplate.bt
-//      http://blog.csdn.net/luoshengyang/article/details/8744683
+// Reference: https://android.googlesource.com/platform/frameworks/base/+/android-4.4.4_r1.0.1/include/androidfw/ResourceTypes.h
 // Build: 2017.9.22
 //--------------------------------------
 
@@ -130,11 +128,12 @@ typedef struct string_utf16_offset_st(uint stringPart_offset){
 
 } string_utf16_offset <read=offset2UTF16String>;
 
-string offset2UTF16String(string_utf16_offset_st &o) {
-    if (o.str.len > 0)
+wstring offset2UTF16String(string_utf16_offset &o) {
+    if (o.str.len.size > 0){
         return o.str.data;
-    else
-        return "";
+    }else{
+        return L"";
+    }
 }
 
 typedef struct {
