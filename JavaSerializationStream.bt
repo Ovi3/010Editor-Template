@@ -1,0 +1,805 @@
+//------------------------------------------------
+//--- 010 Editor v11.0.1 Binary Template
+//
+//      File: 
+//   Authors: Ovie
+//   Version: 
+//   Purpose: Parse Java Object Serialization Stream
+//  Category: Programming
+// File Mask: *.ser
+//  ID Bytes: AC ED
+//   History:
+//------------------------------------------------
+
+
+
+
+local ubyte TC_NULL  = 0x70;
+local ubyte TC_REFERENCE = 0x71;
+local ubyte TC_CLASSDESC = 0x72;
+local ubyte TC_OBJECT  = 0x73;
+local ubyte TC_STRING = 0x74;
+local ubyte TC_ARRAY = 0x75;
+local ubyte TC_CLASS  = 0x76;
+local ubyte TC_BLOCKDATA = 0x77;
+local ubyte TC_ENDBLOCKDATA = 0x78;
+local ubyte TC_RESET  = 0x79;
+local ubyte TC_BLOCKDATALONG = 0x7A;
+local ubyte TC_EXCEPTION = 0x7B;
+local ubyte TC_LONGSTRING  = 0x7C;
+local ubyte TC_PROXYCLASSDESC = 0x7D;
+local ubyte TC_ENUM = 0x7E;
+
+typedef enum<ubyte> {
+    TC_NULL  = 0x70,
+    TC_REFERENCE = 0x71,
+    TC_CLASSDESC = 0x72,
+    TC_OBJECT  = 0x73,
+    TC_STRING = 0x74,
+    TC_ARRAY = 0x75,
+    TC_CLASS  = 0x76,
+    TC_BLOCKDATA = 0x77,
+    TC_ENDBLOCKDATA = 0x78,
+    TC_RESET  = 0x79,
+    TC_BLOCKDATALONG = 0x7A,
+    TC_EXCEPTION = 0x7B,
+    TC_LONGSTRING  = 0x7C,
+    TC_PROXYCLASSDESC = 0x7D,
+    TC_ENUM = 0x7E,
+} TC <format=hex>;
+
+
+local int MAX_LOOP_COUNT = 56;
+
+local int MAX_HANDLEID_COUNT = 65535;
+local uint HANDLE_IDS[MAX_HANDLEID_COUNT]; // index is handleId - 0x007E0000, value is file offset that point to corresponding object
+local int CURRENT_HANDLEID_LENGTH = 0;
+local int ENABLE_NEW_HANDLE = 1;
+
+void newHandle(uint structBase) {
+    if (ENABLE_NEW_HANDLE == 1){
+        HANDLE_IDS[CURRENT_HANDLEID_LENGTH] = structBase;
+        CURRENT_HANDLEID_LENGTH += 1;
+
+
+        local uint local_handleId = 0x007e0000 + CURRENT_HANDLEID_LENGTH - 1;
+        local uint local_fileOffset = structBase;
+        local ubyte local_tc = ReadUByte(local_fileOffset);
+
+        Printf("newHandle: %08x, offset: 0x%04x, tc: %17s %s\n", local_handleId, local_fileOffset, tcRead(local_tc), readHandleString(local_handleId));
+    }
+
+}
+
+string readHandleString(uint handleId){
+    local int handleIndex = handleId - 0x007e0000;
+    local uint structBase = HANDLE_IDS[handleIndex];
+    local ubyte tc = ReadUByte(structBase);
+    if (tc == TC_STRING) { // NewString struct.
+        local ushort length = ReadUShort(structBase + 1);
+        local string data = ReadString(structBase + 1 + 2, length);
+        return data; // return string data
+    } else if (tc == TC_OBJECT) {  // NewObject struct
+        local ubyte inner_tc = ReadUByte(structBase + 1);
+        if (inner_tc == TC_CLASSDESC) { // NewClassDesc struct
+            local ushort length = ReadUShort(structBase + 1 + 1);
+            local string className = ReadString(structBase + 1 + 1 + 2, length);
+            return className; // return class name
+        } else if (inner_tc == TC_REFERENCE) {
+            local uint handleId2 = ReadUInt(structBase + 1 + 1);
+            return readHandleString(handleId2);
+        }
+    } else if (tc == TC_CLASSDESC) { // NewClassDesc struct
+        local ushort length = ReadUShort(structBase + 1);
+        local string className = ReadString(structBase + 1 + 2, length);
+        return className; // return class name
+    } else if (tc == TC_ARRAY) {  // NewArray struct
+        local ubyte inner_tc = ReadUByte(structBase + 1);
+        if (inner_tc == TC_CLASSDESC) { // NewClassDesc struct
+            local ushort length = ReadUShort(structBase + 1 + 1);
+            local string className = ReadString(structBase + 1 + 1 + 2, length);
+            return className; // return array class name
+        } else if (inner_tc == TC_REFERENCE) {
+            local uint handleId2 = ReadUInt(structBase + 1 + 1);
+            return readHandleString(handleId2);
+        }
+    } else if (tc == TC_CLASS) {  // ClassDesc struct
+        local ubyte inner_tc = ReadUByte(structBase + 1);
+        if (inner_tc == TC_CLASSDESC) { // NewClassDesc struct
+            local ushort length = ReadUShort(structBase + 1 + 1);
+            local string className = ReadString(structBase + 1 + 1 + 2, length);
+            return className; // return class name
+        } else if (inner_tc == TC_REFERENCE) {
+            local uint handleId2 = ReadUInt(structBase + 1 + 1);
+            return readHandleString(handleId2);
+        }
+    } else if (tc == TC_PROXYCLASSDESC) { //
+
+    }
+
+    return "unknown handle";
+}
+
+struct ClassDesc;
+struct NewObject;
+struct Object;
+struct NewArray;
+struct Content;
+struct PrevObject;
+struct NewString;
+struct Fields;
+struct ClassData;
+struct FieldDesc;
+struct ObjectDesc;
+struct PrimitiveDesc;
+struct ClassName1;
+
+string tcRead(ubyte &tc) {
+    switch (tc){
+    case TC_NULL:
+        return "TC_NULL";
+    case TC_REFERENCE:
+        return "TC_REFERENCE";
+    case TC_CLASSDESC:
+        return "TC_CLASSDESC";
+    case TC_OBJECT:
+        return "TC_OBJECT";
+    case TC_STRING:
+        return "TC_STRING";
+    case TC_ARRAY:
+        return "TC_ARRAY";
+    case TC_CLASS:
+        return "TC_CLASS";
+    case TC_BLOCKDATA:
+        return "TC_BLOCKDATA";
+    case TC_ENDBLOCKDATA:
+        return "TC_ENDBLOCKDATA";
+    case TC_RESET:
+        return "TC_RESET";
+    case TC_BLOCKDATALONG:
+        return "TC_BLOCKDATALONG";
+    case TC_EXCEPTION:
+        return "TC_EXCEPTION";
+    case TC_LONGSTRING:
+        return "TC_LONGSTRING";
+    case TC_PROXYCLASSDESC:
+        return "TC_PROXYCLASSDESC";
+    case TC_ENUM:
+        return "TC_ENUM";
+    default:
+        string s;
+        SPrintf(s, "%02x", tc);
+        return "unknown tc (" + s + ")";
+    }
+}
+
+string primTypecodeRead(char &prim_typecode) {
+    switch (prim_typecode){
+    case 'B':
+        return "byte(B)";
+    case 'C':
+        return "char(C)";
+    case 'D':
+        return "double(D)";
+    case 'F':
+        return "float(F)";
+    case 'I':
+        return "integer(I)";
+    case 'J':
+        return "long(J)";
+    case 'S':
+        return "short(S)";
+    case 'Z':
+        return "boolean(Z)";
+    default:
+        return "unknown primitive type(" + prim_typecode + ")";
+    }
+}
+
+struct PrimitiveDesc {
+    char prim_typecode <read=primTypecodeRead>;
+    ushort fieldNameLength;
+    char fieldName[fieldNameLength] <open=suppress>;
+};
+
+string objTypecodeRead(char &obj_typecode) {
+    switch (obj_typecode){
+    case '[':
+        return "array([)";
+    case 'L':
+        return "object(L)";
+    default:
+        return "unknown object type(" + obj_typecode + ")";
+    }
+}
+
+
+
+
+string className1Read(ClassName1 &className1) {
+    if (className1.tc == TC_STRING){
+        return className1.newString.str;
+    } else if (className1.tc == TC_LONGSTRING) {
+        // TODO
+    } else if (className1.tc == TC_REFERENCE) {
+        return readHandleString(className1.prevObject.handleId);
+    }
+    return "unknown class name";
+};
+
+struct ClassName1 { // string object or a reference pointed to a string object
+    local ubyte tc = ReadUByte();
+    if (tc == TC_STRING || tc == TC_LONGSTRING){
+        NewString newString;
+    } else if (tc == TC_REFERENCE) {
+        PrevObject prevObject;
+    }
+};
+
+struct ObjectDesc {
+    char obj_typecode <read=objTypecodeRead>;
+    ushort fieldNameLength;
+    char fieldName[fieldNameLength] <open=suppress>;
+    ClassName1 className1;
+};
+
+string fieldDescRead(FieldDesc &fieldDesc){
+    local string r;
+    if (fieldDesc.type != '[' && fieldDesc.type != 'L') {
+        SPrintf(r, "filedName: %s, type: %s", fieldDesc.primitiveDesc.fieldName, primTypecodeRead(fieldDesc.primitiveDesc.prim_typecode));
+    } else {
+        SPrintf(r, "filedName: %s, type: %s", fieldDesc.objectDesc.fieldName, className1Read(fieldDesc.objectDesc.className1));
+    }
+    return r;
+};
+
+struct FieldDesc {
+    local char type = ReadByte();
+    if (type != '[' && type != 'L'){
+        PrimitiveDesc primitiveDesc;
+    } else {
+        ObjectDesc objectDesc;
+    }
+
+};
+
+struct Fileds {
+    ushort count;
+    FieldDesc fieldDesc[count] <optimize=false>;
+};
+
+
+struct ClassAnnotation {
+    local ubyte local_tc = ReadUByte();
+    if (local_tc == TC_ENDBLOCKDATA) {
+        TC tc; // TC_ENDBLOCKDATA
+    } else {
+        local ubyte local_tc1 = ReadUByte();
+        local int i;
+        for( i = 0; i < MAX_LOOP_COUNT; i++){
+            if (local_tc1 == TC_ENDBLOCKDATA) {
+                break;
+            }
+            Content content;  // contents written by annotateClass
+            local_tc1 = ReadUByte();
+        }
+
+        TC tc;   // TC_ENDBLOCKDATA
+    }
+};
+
+
+local ubyte SC_WRITE_METHOD  = 0x01;  //if SC_SERIALIZABLE
+local ubyte SC_BLOCK_DATA  = 0x08;     //if SC_EXTERNALIZABLE
+local ubyte SC_SERIALIZABLE  = 0x02;
+local ubyte SC_EXTERNALIZABLE  = 0x04;
+local ubyte SC_ENUM  = 0x10;
+
+string classDescFlagsRead(ubyte &classDescFlags){
+    string l = "";
+    string r = "";
+
+
+    if(classDescFlags & SC_WRITE_METHOD) l += Strlen(l) > 0 ? " | SC_WRITE_METHOD" : "SC_WRITE_METHOD";
+    if(classDescFlags & SC_BLOCK_DATA) l += Strlen(l) > 0 ? " | SC_BLOCK_DATA" : "SC_BLOCK_DATA";
+    if(classDescFlags & SC_SERIALIZABLE) l += Strlen(l) > 0 ? " | SC_SERIALIZABLE" : "SC_SERIALIZABLE";
+    if(classDescFlags & SC_EXTERNALIZABLE) l += Strlen(l) > 0 ? " | SC_EXTERNALIZABLE" : "SC_EXTERNALIZABLE";
+    if(classDescFlags & SC_ENUM) l += Strlen(l) > 0 ? " | SC_ENUM" : "SC_ENUM";
+
+
+    SPrintf(r, " (%xh)", classDescFlags);
+
+    return l + r;
+}
+
+
+
+struct SuperClassDesc {
+    ClassDesc classDesc;
+};
+
+
+
+struct ClassDescInfo {
+    ubyte classDescFlags <read=classDescFlagsRead>;
+    Fileds fields;
+    ClassAnnotation classAnnotation;
+    SuperClassDesc superClassDesc;
+};
+
+struct ProxyInterfaceName {
+    ushort length;
+    char name[length] <open=suppress>;
+};
+
+struct ProxyClassDescInfo {
+    int count <comment="Interface count">;
+    local int i;
+    for(i=0; i < count; i++) {
+        ProxyInterfaceName proxyInterfaceName;
+    }
+
+    ClassAnnotation classAnnotation;
+    SuperClassDesc superClassDesc;
+};
+
+struct NewClassDesc {
+    TC tc;
+    if (tc == TC_CLASSDESC) {
+        ushort classNameLength;
+        char className[classNameLength] <open=suppress>;
+        int64 serialVersionUID;
+        newHandle(startof(this));
+        ClassDescInfo classDescInfo;
+    } else if (tc == TC_PROXYCLASSDESC){
+        newHandle(startof(this));
+        ProxyClassDescInfo proxyClassDescInfo;
+    }
+};
+
+
+// for local
+// Unlike struct ClassDesc, this will not call newHandle()
+struct LocalClassDesc {
+    local ubyte tc = ReadUByte();
+
+    if (tc == TC_CLASSDESC || tc == TC_PROXYCLASSDESC) {
+        local struct {
+            TC tc;
+            if (tc == TC_CLASSDESC) {
+                ushort classNameLength;
+                char className[classNameLength] <open=suppress>;
+                int64 serialVersionUID;
+                ClassDescInfo classDescInfo;
+            } else if (tc == TC_PROXYCLASSDESC){
+                ProxyClassDescInfo proxyClassDescInfo;
+            }
+        } newClassDesc;
+    } else if (tc == TC_NULL){  // nullReference
+        TC tc;
+    } else if (tc == TC_REFERENCE){
+        local struct {
+
+        } prevObject;  // point to a ClassDesc struct
+    }
+};
+
+struct ClassDesc {
+    local ubyte tc = ReadUByte();
+
+    if (tc == TC_CLASSDESC || tc == TC_PROXYCLASSDESC) {
+        NewClassDesc newClassDesc;
+    } else if (tc == TC_NULL){  // nullReference
+        TC tc1;
+    } else if (tc == TC_REFERENCE){
+        PrevObject prevObject;  // point to a ClassDesc struct
+    }
+
+};
+
+
+string booleanRead(ubyte &value) {
+    if (value == 0x00) {
+        return "false";
+    } else if (value == 0x01) {
+        return "true";
+    }
+    return "bool (error)";
+}
+
+struct Nowrclass(ClassDesc &classDesc) {
+    local int local_i, x;
+    local int count = classDesc.newClassDesc.classDescInfo.fields.count;
+    Printf("nowr filed count %d\n", count);
+
+    local string fieldTypeStr;
+    for(local_i = 0; local_i < count; local_i++){
+        fieldTypeStr = fieldDescRead(classDesc.newClassDesc.classDescInfo.fields.fieldDesc[local_i]);
+        Printf("%s\n", fieldTypeStr);
+        switch (classDesc.newClassDesc.classDescInfo.fields.fieldDesc[local_i].type) {
+        // obj_typecode:
+        case '[':  // array
+        case 'L':  // object
+            Object value;
+            break;
+
+        // prim_typecode:
+        case 'I':  // integer
+            int value;
+            break;
+        case 'B':  // byte
+            byte value;
+            break;
+        case 'C':  // char
+            ushort value;
+            break;
+        case 'D':  // double
+            double value;
+            break;
+        case 'F':  // float
+            float value;
+            break;
+        case 'J':  // long
+            int64 value;
+            break;
+        case 'S':  // short
+            short value;
+            break;
+        case 'Z':  // boolean
+            ubyte value <read=booleanRead>;
+            break;
+        }
+    }
+};
+
+struct Wrclass(ClassDesc &classDesc) {
+    Nowrclass nowrclass(classDesc);
+};
+
+
+struct ObjectAnnotation {
+    local ubyte local_tc = ReadUByte();
+    if (local_tc == TC_ENDBLOCKDATA) {
+        TC tc;
+    } else {
+        local ubyte local_tc1 = ReadUByte();
+        local int i;
+        for( i = 0; i < MAX_LOOP_COUNT; i++){
+            if (local_tc1 == TC_ENDBLOCKDATA) {
+                break;
+            }
+            Content content;  // contents written by writeObject or writeExternal PROTOCOL_VERSION_2
+            local_tc1 = ReadUByte();
+        }
+
+        TC tc;   // TC_ENDBLOCKDATA
+    }
+
+};
+
+
+
+struct ClassData(ClassDesc &classDesc){
+
+    // deal with classData of super class first
+    local uint savedPos1 = FTell();
+
+    Printf("tc %s\n", tcRead(t_classDesc.tc));
+    FSeek(startof(classDesc.newClassDesc.classDescInfo.superClassDesc.classDesc));
+    ENABLE_NEW_HANDLE = 0;
+    local ClassDesc t_superClassDesc;
+    ENABLE_NEW_HANDLE = 1;
+    FSeek(savedPos1);
+
+
+    if (t_superClassDesc.tc == TC_CLASSDESC) {
+        ClassData classdata(t_superClassDesc);
+    } else if (t_superClassDesc.tc == TC_REFERENCE){
+        savedPos1 = FTell();
+        prevObjectBase = HANDLE_IDS[t_superClassDesc.prevObject.handleId - 0x007e0000];
+        FSeek(prevObjectBase);
+        Printf("super offset: %x\n", prevObjectBase);
+        local_tc = ReadUByte(prevObjectBase);
+        Printf("super tc %x\n", local_tc);
+        if (local_tc == TC_CLASSDESC) {
+            ENABLE_NEW_HANDLE = 0;
+            local ClassDesc t_superClassDesc;
+            ENABLE_NEW_HANDLE = 1;
+            FSeek(savedPos1);
+        } else if (local_tc == TC_ARRAY) {  // NewArray
+            FSeek(prevObjectBase + 1); // skip tc byte
+            ENABLE_NEW_HANDLE = 0;
+            local ClassDesc t_superClassDesc;
+            ENABLE_NEW_HANDLE = 1;
+            FSeek(savedPos1);
+        }
+        ClassData classdata(t_superClassDesc);
+    }
+
+
+    // deal with classData of current classDesc
+    local ubyte sc = classDesc.newClassDesc.classDescInfo.classDescFlags;
+    if ((sc & SC_SERIALIZABLE) && !(sc & SC_WRITE_METHOD)){
+        Nowrclass nowrclass(classDesc);
+    } else if ((sc & SC_SERIALIZABLE) && (sc & SC_WRITE_METHOD)) {
+        Wrclass wrclass(classDesc);
+        ObjectAnnotation objectAnnotation;
+    } else if ((sc & SC_EXTERNALIZABLE) && !(sc & SC_BLOCK_DATA)) {
+        // TODO externalContents
+    } else if ((sc & SC_EXTERNALIZABLE) && (sc & SC_BLOCK_DATA)) {
+        ObjectAnnotation objectAnnotation;
+    }
+};
+
+struct NewObject {
+    TC tc;  // TC_OBJECT
+    local uint savedPos1 = FTell();
+    ClassDesc classDesc;
+    local uint savedPos2 = FTell();
+    newHandle(startof(this));
+
+    FSeek(savedPos1);
+    ENABLE_NEW_HANDLE = 0;
+    local ClassDesc t_classDesc;
+    ENABLE_NEW_HANDLE = 1;
+    FSeek(savedPos2);
+
+
+    local uint prevObjectBase;
+    local ubyte local_tc;
+
+    if (t_classDesc.tc == TC_REFERENCE){
+        savedPos1 = FTell();
+        prevObjectBase = HANDLE_IDS[classDesc.prevObject.handleId - 0x007e0000];
+        FSeek(prevObjectBase);
+        Printf("offset: %x\n", prevObjectBase);
+        local_tc = ReadUByte(prevObjectBase);
+        Printf("%x\n", local_tc);
+        if (local_tc == TC_CLASSDESC) {
+            ENABLE_NEW_HANDLE = 0;
+            local ClassDesc t_classDesc;
+            ENABLE_NEW_HANDLE = 1;
+            FSeek(savedPos1);
+        } else if (local_tc == TC_ARRAY) {  // NewArray
+            FSeek(prevObjectBase + 1); // skip tc byte
+            ENABLE_NEW_HANDLE = 0;
+            local ClassDesc t_classDesc;
+            ENABLE_NEW_HANDLE = 1;
+            FSeek(savedPos1);
+        }
+    }
+
+    if (classDesc.tc == TC_CLASSDESC || classDesc.tc == TC_REFERENCE){
+        /*
+        savedPos1 = FTell();
+
+        Printf("tc %s\n", tcRead(t_classDesc.tc));
+        FSeek(startof(t_classDesc.newClassDesc.classDescInfo.superClassDesc.classDesc));
+        ENABLE_NEW_HANDLE = 0;
+        local ClassDesc t_superClassDesc;
+        ENABLE_NEW_HANDLE = 1;
+        FSeek(savedPos1);
+
+
+        if (t_superClassDesc.tc == TC_CLASSDESC) {
+            ClassData classdata(t_superClassDesc);
+        } else if (t_superClassDesc.tc == TC_REFERENCE){
+            savedPos1 = FTell();
+            prevObjectBase = HANDLE_IDS[t_superClassDesc.prevObject.handleId - 0x007e0000];
+            FSeek(prevObjectBase);
+            Printf("super offset: %x\n", prevObjectBase);
+            local_tc = ReadUByte(prevObjectBase);
+            Printf("super tc %x\n", local_tc);
+            if (local_tc == TC_CLASSDESC) {
+                ENABLE_NEW_HANDLE = 0;
+                local ClassDesc t_superClassDesc;
+                ENABLE_NEW_HANDLE = 1;
+                FSeek(savedPos1);
+            } else if (local_tc == TC_ARRAY) {  // NewArray
+                FSeek(prevObjectBase + 1); // skip tc byte
+                ENABLE_NEW_HANDLE = 0;
+                local ClassDesc t_superClassDesc;
+                ENABLE_NEW_HANDLE = 1;
+                FSeek(savedPos1);
+            }
+            ClassData classdata(t_superClassDesc);
+        }
+        */
+        ClassData classdata(t_classDesc);
+    }
+
+
+
+
+};
+
+struct NewString {
+    TC tc;
+    if (tc == TC_STRING){
+        newHandle(startof(this));
+        ushort length;
+        char str[length] <open=suppress>;
+    } else if (tc == TC_LONGSTRING) {
+        // newHandle(startof(this));
+        // TODO
+    }
+};
+
+
+struct NewArray {
+    TC tc;
+    ClassDesc classDesc;
+    newHandle(startof(this));
+    int size;
+    local string classname;
+    if (classDesc.tc == TC_REFERENCE) {
+        classname = readHandleString(classDesc.prevObject.handleId);
+    }else {
+        classname = classDesc.newClassDesc.className;
+    }
+    // Printf("ppp %s\n", classname);
+    if (classname == "[I"){
+        int value[size];
+    } else if (classname == "[B"){
+        byte value[size] <open=suppress>;
+    } else if (classname == "[C"){
+        ushort value[size];
+    } else if (classname == "[D"){
+        double value[size];
+    } else if (classname == "[F"){
+        float value[size];
+    } else if (classname == "[J"){
+        int64 value[size];
+    } else if (classname == "[S"){
+        short value[size];
+    } else if (classname == "[Z"){
+        ubyte value[size];
+    } else {
+        Object value[size] <optimize=false>;
+    }
+
+};
+
+
+string handleIdComment(uint &handleId){
+    local uint local_fileOffset = HANDLE_IDS[handleId - 0x007e0000];
+    local ubyte local_tc = ReadUByte(local_fileOffset);
+
+    string s;
+    SPrintf(s, "Point to offset 0x%04x. %s (%s)\n", local_fileOffset, tcRead(local_tc), readHandleString(handleId));
+    return s;
+}
+
+struct PrevObject {
+    TC tc; // TC_REFERENCE;
+    uint handleId <format=hex, comment=handleIdComment>;
+} ;
+
+
+struct NewClass{
+    TC tc; // TC_CLASS
+    ClassDesc classDesc;
+    newHandle(startof(this));
+};
+
+
+struct NewEnum {
+    TC tc; // TC_ENUM
+    ClassDesc classDesc;
+    newHandle(startof(this));
+    Object enumConstantName; // string object
+};
+
+
+struct Exception {
+    TC tc; // TC_EXCEPTION;
+    // reset;
+    // Throwable object;
+    // reset;
+};
+
+
+struct Object {
+    local ubyte tc = ReadUByte();
+    switch (tc) {
+    case TC_OBJECT:
+        NewObject newObject;
+        break;
+    case TC_STRING:
+    case TC_LONGSTRING:
+        NewString newString;
+        break;
+    case TC_ARRAY:
+        NewArray newArray;
+        break;
+    case TC_NULL:  // nullReference
+        TC tc;
+        break;
+    case TC_REFERENCE:
+        PrevObject prevObject;
+        break;
+    case TC_CLASS:
+        NewClass newClass;
+        break;
+    case TC_ENUM:
+        NewEnum newEnum;
+        break;
+    case TC_CLASSDESC:
+    case TC_PROXYCLASSDESC:
+        NewClassDesc newClassDesc;
+        break;
+    case TC_EXCEPTION:
+        Exception exception;
+        break;
+    case TC_RESET:
+        TC tc; // TC_RESET
+        break;
+    }
+
+
+};
+
+
+struct BlockData {
+    local ubyte tc = ReadUByte();
+    switch (tc) {
+    case TC_BLOCKDATA:  // blockdatashort
+        TC tc;  // TC_BLOCKDATA
+        ubyte size;
+        byte data[size] <open=suppress>;
+        break;
+    case TC_BLOCKDATALONG: // blockdatalong
+        TC tc;  // TC_BLOCKDATALONG
+        int size;
+        byte data[size] <open=suppress>;
+        break;
+    }
+};
+
+
+struct Content {
+    local ubyte tc = ReadUByte();
+    if (tc == TC_BLOCKDATA || tc == TC_BLOCKDATALONG) {
+        BlockData blockdata;
+    } else {
+        Object object;
+    }
+};
+
+
+struct Stream {
+    ushort magic <format=hex,name="STREAM_MAGIC">;  // STREAM_MAGIC
+    ushort version <format=hex,name="STREAM_VERSION">;  // STREAM_VERSION
+    local int i;
+    while (FTell() < FileSize() && i < MAX_LOOP_COUNT){
+        Content content;
+        i += 1;
+    }
+
+};
+
+
+
+
+
+
+BigEndian();
+
+Stream stream;
+
+
+/*
+Printf("Handles:\n");
+local int local_i;
+local uint local_handleId;
+local uint local_fileOffset;
+local ubyte local_tc;
+for(local_i=0; local_i < CURRENT_HANDLEID_LENGTH; local_i++){
+    local_handleId = 0x007e0000 + local_i;
+    local_fileOffset = HANDLE_IDS[local_i];
+    local_tc = ReadUByte(local_fileOffset);
+
+    Printf("handle: %08x, offset: 0x%04x, tc: %17s %s\n", local_handleId, local_fileOffset, tcRead(local_tc), readHandleString(local_handleId));
+}
+
+*/
